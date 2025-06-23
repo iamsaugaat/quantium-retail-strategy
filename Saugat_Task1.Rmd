@@ -1,0 +1,221 @@
+---
+title: "Saugat_Task1"
+author: "Saugat Pyakuryal"
+date: "2025-06-23"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load required libraries
+library(data.table)
+library(ggplot2)
+library(readxl)
+library(stringr)
+```
+
+```{r}
+# Load datasets
+transaction_data <- as.data.table(read_excel("QVI_transaction_data.xlsx"))
+customer_data <- fread("QVI_purchase_behaviour.csv")
+
+# Check structure
+str(transaction_data)
+head(transaction_data)
+
+# Check summary of customer data
+str(customer_data)
+head(customer_data)
+
+```
+
+```{r}
+# Convert DATE to proper Date format
+transaction_data[, DATE := as.Date(DATE, origin = "1899-12-30")]
+
+# Remove salsa products from PROD_NAME
+transaction_data <- transaction_data[!grepl("salsa", tolower(PROD_NAME))]
+
+# View outliers
+transaction_data[PROD_QTY > 100]
+
+# Save loyalty ID of outlier customer
+outlier_ids <- transaction_data[PROD_QTY > 100, unique(LYLTY_CARD_NBR)]
+print(outlier_ids)
+
+# Remove outliers
+transaction_data <- transaction_data[!LYLTY_CARD_NBR %in% outlier_ids]
+```
+
+```{r}
+# Extract pack size from product name using regex
+transaction_data[, PACK_SIZE := as.numeric(str_extract(PROD_NAME, "\\d+"))]
+
+# Extract brand
+transaction_data[, BRAND := tstrsplit(PROD_NAME, " ")[[1]]]
+
+# Clean up known brand aliasing
+transaction_data[BRAND == "RED", BRAND := "RRD"]
+transaction_data[BRAND == "SNB", BRAND := "SUNBITES"]
+transaction_data[BRAND == "WW", BRAND := "WOOLWORTHS"]
+transaction_data[BRAND == "INFZ", BRAND := "INFUZIONS"]
+
+# Extract PACK_SIZE from product name
+transaction_data[, PACK_SIZE := as.numeric(str_extract(PROD_NAME, "\\d+"))]
+
+# Show how many transactions occurred for each pack size
+transaction_data[, .N, by = PACK_SIZE][order(PACK_SIZE)]
+
+# Extract brand name as the first word in PROD_NAME
+transaction_data[, BRAND := tstrsplit(PROD_NAME, " ")[[1]]]
+
+# inspect unique brand names
+unique(transaction_data$BRAND)
+
+# Clean common brand aliases for consistency
+transaction_data[BRAND == "RED", BRAND := "RRD"]
+transaction_data[BRAND == "SNB", BRAND := "SUNBITES"]
+transaction_data[BRAND == "WW", BRAND := "WOOLWORTHS"]
+transaction_data[BRAND == "INFZ", BRAND := "INFUZIONS"]
+
+# Merge customer attributes into the transaction data
+merged_data <- merge(transaction_data, customer_data, by = "LYLTY_CARD_NBR", all.x = TRUE)
+```
+
+```{r}
+# Check for missing customer info
+sum(is.na(merged_data$LIFESTAGE))        
+sum(is.na(merged_data$PREMIUM_CUSTOMER))
+```
+
+```{r}
+# Group by lifestage and premium segment, sum total sales
+sales_by_segment <- merged_data[, .(Total_Sales = sum(TOT_SALES)), by = .(LIFESTAGE, PREMIUM_CUSTOMER)]
+
+# Visualize
+ggplot(sales_by_segment, aes(x = LIFESTAGE, y = Total_Sales, fill = PREMIUM_CUSTOMER)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme_minimal(base_size = 11) +
+  labs(title = "Total Sales by Customer Segment",
+       x = "Lifestage",
+       y = "Total Sales ($)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+# Count unique customers per segment
+cust_count_by_segment <- unique(merged_data[, .(LYLTY_CARD_NBR, LIFESTAGE, PREMIUM_CUSTOMER)])
+cust_count_by_segment <- cust_count_by_segment[, .N, by = .(LIFESTAGE, PREMIUM_CUSTOMER)]
+
+# Visualize
+ggplot(cust_count_by_segment, aes(x = LIFESTAGE, y = N, fill = PREMIUM_CUSTOMER)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Number of Unique Customers by Segment",
+       x = "Lifestage",
+       y = "Customer Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+
+# Sum quantity and get unique customer count per segment
+units_by_segment <- merged_data[, .(Total_Units = sum(PROD_QTY)), by = .(LIFESTAGE, PREMIUM_CUSTOMER)]
+units_by_segment[, N_Customers := cust_count_by_segment$N]
+units_by_segment[, Avg_Units_Per_Customer := Total_Units / N_Customers]
+
+# Visualize
+ggplot(units_by_segment, aes(x = LIFESTAGE, y = Avg_Units_Per_Customer, fill = PREMIUM_CUSTOMER)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Avg. Chip Units per Customer",
+       y = "Avg. Units", x = "Lifestage") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+# Total sales / total quantity = avg unit price
+price_by_segment <- merged_data[, .(Avg_Price = sum(TOT_SALES) / sum(PROD_QTY)), by = .(LIFESTAGE, PREMIUM_CUSTOMER)]
+
+# Visualize
+ggplot(price_by_segment, aes(x = LIFESTAGE, y = Avg_Price, fill = PREMIUM_CUSTOMER)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Avg. Price per Chip Packet",
+       y = "Avg. Price ($)", x = "Lifestage") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+## Insights
+# Mainstream & Budget Older Families, Mainstream Retirees, and Mainstream Young Singles/Couples are driving most chip sales.
+# Premium customers buy fewer chips overall, less engaged with the category.
+# Big sales from Mainstream Retirees and Young Singles/Couples are due to their large numbers.
+# Budget Older Families punch above their weight — fewer in number but buy a lot of chips.
+# Families (Older & Young) buy more chip units per person.
+# Price per pack is steady, but Mainstream Young Singles/Couples pay slightly more, possibly open to premium products.
+```
+
+```{r}
+# Create a unit price column
+merged_data[, UNIT_PRICE := TOT_SALES / PROD_QTY]
+
+# Filter to Young Singles/Couples
+ysc <- merged_data[LIFESTAGE == "YOUNG SINGLES/COUPLES"]
+
+# Run t-test: Mainstream vs Others
+t_test_result <- t.test(UNIT_PRICE ~ PREMIUM_CUSTOMER, 
+                        data = ysc[PREMIUM_CUSTOMER %in% c("Mainstream", "Budget")])
+print(t_test_result)
+```
+
+```{r}
+# Mainstream Young Singles/Couples pay an average of $4.07 per chip pack
+# Budget Young Singles/Couples pay around $3.66 per pack
+# p-value < 2.2 → statistically significant difference
+# Mainstream customers in this lifestage are willing to pay more, a solid premium positioning opportunity
+
+```
+
+```{r}
+# Filter to target group
+target_segment <- merged_data[LIFESTAGE == "YOUNG SINGLES/COUPLES" & PREMIUM_CUSTOMER == "Mainstream"]
+
+# Count top brands
+top_brands <- target_segment[, .N, by = BRAND][order(-N)]
+
+# Visualize
+ggplot(top_brands[1:10], aes(x = reorder(BRAND, -N), y = N)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Top Brands: Mainstream Young Singles/Couples",
+       x = "Brand", y = "Units Purchased") +
+  theme_minimal()
+```
+
+```{r}
+# Count preferred pack sizes
+top_packs <- target_segment[, .N, by = PACK_SIZE][order(-N)]
+
+# Visualize
+ggplot(top_packs, aes(x = factor(PACK_SIZE), y = N)) +
+  geom_bar(stat = "identity", fill = "darkorange") +
+  labs(title = "Preferred Pack Sizes: Mainstream Young Singles/Couples",
+       x = "Pack Size (g)", y = "Units Purchased") +
+  theme_minimal()
+```
+
+```{r}
+# Segment Deep Dive: Mainstream Young Singles/Couples
+
+# This segment buys the most chips among young customers and pays more per pack (confirmed by t-test).
+# Top brands: Kettle, Pringles, Doritos — suggests preference for premium/well-known options.
+# Most popular pack size: 175g by far, followed by 150g and 135g (mid-sized packs are key).
+
+# Strategic Rec:
+# Focus marketing on Mainstream Young Singles/Couples.
+# Run promos on 150g–175g packs of premium brands like Kettle/Pringles.
+# Try limited-edition flavors or slight price bumps, they’ll likely accept it.
+```
+
