@@ -1,5 +1,5 @@
-# Quantium Virtual Internship - Task 1
-Retail Strategy & Analytics | Chips Category
+# Quantium - Retail Strategy & Analytics
+Task 1 | Chips Category
 
 This project analyzes customer purchase data to derive actionable business insights for Quantium’s client in the FMCG space.
 
